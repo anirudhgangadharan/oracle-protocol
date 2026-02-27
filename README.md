@@ -7,7 +7,7 @@ and outcomes to build a calibrated model of your own cognition.
 
 1. Create a GitHub Personal Access Token with `repo` scope
 2. Enable GitHub Pages for this repo (Settings > Pages > Source: main branch)
-3. Visit `https://<username>.github.io/oracle-protocol/`
+3. Visit `https://anirudhgangadharan.github.io/oracle-protocol/`
 4. Enter your username, repo name, and PAT
 5. Start logging decisions
 
