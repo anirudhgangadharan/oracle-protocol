@@ -1,0 +1,1476 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Oracle Protocol</title>
+
+  <!-- CDN Dependencies -->
+  <script crossorigin src="https://unpkg.com/react@18.2.0/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.24.0/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
+
+  <!-- Tailwind Config -->
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            bg: '#0a0a0f',
+            surface: { DEFAULT: '#12121a', elevated: '#1a1a2e' },
+            border: '#2a2a3e',
+            accent: { DEFAULT: '#6366f1', hover: '#818cf8' },
+          }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #0a0a0f;
+      color: #e4e4e7;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: #0a0a0f; }
+    ::-webkit-scrollbar-thumb { background: #2a2a3e; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #3a3a4e; }
+    .mono { font-family: 'SF Mono', 'Fira Code', Menlo, Consolas, monospace; }
+    input[type="range"] { -webkit-appearance: none; background: transparent; width: 100%; cursor: pointer; }
+    input[type="range"]::-webkit-slider-track { height: 6px; background: #2a2a3e; border-radius: 3px; }
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none; height: 22px; width: 22px; border-radius: 50%;
+      background: #6366f1; margin-top: -8px; border: 2px solid #0a0a0f;
+    }
+    input[type="range"]::-moz-range-track { height: 6px; background: #2a2a3e; border-radius: 3px; }
+    input[type="range"]::-moz-range-thumb {
+      height: 22px; width: 22px; border-radius: 50%;
+      background: #6366f1; border: 2px solid #0a0a0f; cursor: pointer;
+    }
+    textarea:focus, input:focus, select:focus {
+      outline: none; border-color: #6366f1 !important;
+      box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
+    }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
+    @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+    .animate-fade { animation: fadeIn 0.2s ease; }
+    .animate-slide { animation: slideIn 0.3s ease; }
+    .btn {
+      padding: 10px 20px; border-radius: 8px; font-weight: 600; font-size: 14px;
+      cursor: pointer; border: none; transition: all 0.15s ease;
+    }
+    .btn-primary { background: #6366f1; color: white; }
+    .btn-primary:hover { background: #818cf8; }
+    .btn-primary:disabled { background: #3730a3; opacity: 0.6; cursor: not-allowed; }
+    .btn-ghost { background: transparent; color: #a1a1aa; border: 1px solid #2a2a3e; }
+    .btn-ghost:hover { background: #1a1a2e; color: #e4e4e7; }
+    .btn-danger { background: #dc2626; color: white; }
+    .btn-danger:hover { background: #ef4444; }
+    .input-field {
+      width: 100%; padding: 10px 14px; background: #12121a; border: 1px solid #2a2a3e;
+      border-radius: 8px; color: #e4e4e7; font-size: 14px; resize: vertical;
+    }
+    .card { background: #12121a; border: 1px solid #2a2a3e; border-radius: 12px; padding: 20px; }
+    .label { font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: #71717a; margin-bottom: 6px; }
+  </style>
+</head>
+<body class="dark">
+  <div id="root"></div>
+
+  <script type="text/babel">
+/* ═══════════════════════════════════════════════════════════
+   ORACLE PROTOCOL — Decision Intelligence System
+   Single-file React app. GitHub API backend. Zero build step.
+   ═══════════════════════════════════════════════════════════ */
+
+const { useState, useReducer, useEffect, useRef, useContext, createContext, useCallback, useMemo } = React;
+
+/* ── Constants ─────────────────────────────────────────── */
+
+const STAKES_COLORS = { low: '#22c55e', medium: '#f59e0b', high: '#f97316', critical: '#ef4444' };
+const STATUS_COLORS = { open: '#6366f1', resolved: '#22c55e' };
+const DATA_PATH = 'data/decisions.json';
+
+/* ── Utilities ─────────────────────────────────────────── */
+
+function generateId() {
+  return crypto?.randomUUID?.() ||
+    'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+      const r = Math.random() * 16 | 0;
+      return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+    });
+}
+
+function now() { return new Date().toISOString(); }
+
+function formatDate(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function truncate(str, len = 60) {
+  if (!str) return '';
+  return str.length > len ? str.slice(0, len) + '...' : str;
+}
+
+function b64Encode(str) { return btoa(unescape(encodeURIComponent(str))); }
+function b64Decode(str) { return decodeURIComponent(escape(atob(str))); }
+
+function calcDelta(probability, outcome) {
+  if (outcome === null || outcome === undefined) return null;
+  const actual = outcome === true ? 1 : outcome === false ? 0 : 0.5;
+  return Math.round((probability - actual) * 1000) / 1000;
+}
+
+function deltaLabel(delta) {
+  if (delta === null || delta === undefined) return '';
+  const abs = Math.abs(delta);
+  if (abs <= 0.05) return 'well-calibrated';
+  return delta > 0 ? 'overconfident' : 'underconfident';
+}
+
+/* ── GitHub API Service ────────────────────────────────── */
+
+const GitHubAPI = {
+  headers(token) {
+    return { 'Authorization': `Bearer ${token}`, 'Accept': 'application/vnd.github.v3+json' };
+  },
+
+  async validateConnection(config) {
+    const res = await fetch(`https://api.github.com/repos/${config.owner}/${config.repo}`, {
+      headers: this.headers(config.token)
+    });
+    if (res.status === 401) throw new Error('Invalid or expired token. Check your PAT.');
+    if (res.status === 403) throw new Error('Access denied. Ensure your PAT has repo scope.');
+    if (res.status === 404) throw new Error('Repository not found. Check owner/repo name.');
+    if (!res.ok) throw new Error(`GitHub error: ${res.status}`);
+    return true;
+  },
+
+  async fetchDecisions(config) {
+    const res = await fetch(
+      `https://api.github.com/repos/${config.owner}/${config.repo}/contents/${DATA_PATH}?ref=${config.branch}`,
+      { headers: this.headers(config.token) }
+    );
+    if (res.status === 404) return { data: { meta: { version: 1, created: now(), lastModified: now(), totalDecisions: 0, resolvedDecisions: 0, overallCalibrationScore: null }, decisions: [] }, sha: null };
+    if (res.status === 401) throw new Error('AUTH_EXPIRED');
+    if (!res.ok) throw new Error(`Failed to fetch: ${res.status}`);
+    const json = await res.json();
+    const content = b64Decode(json.content);
+    return { data: JSON.parse(content), sha: json.sha };
+  },
+
+  async saveDecisions(config, data, sha, commitMsg) {
+    const body = {
+      message: commitMsg,
+      content: b64Encode(JSON.stringify(data, null, 2)),
+      branch: config.branch
+    };
+    if (sha) body.sha = sha;
+
+    const res = await fetch(
+      `https://api.github.com/repos/${config.owner}/${config.repo}/contents/${DATA_PATH}`,
+      { method: 'PUT', headers: this.headers(config.token), body: JSON.stringify(body) }
+    );
+
+    if (res.status === 409) {
+      // Conflict — re-fetch and retry
+      const fresh = await this.fetchDecisions(config);
+      body.sha = fresh.sha;
+      // Merge: use our data (last-write-wins for V1)
+      const retry = await fetch(
+        `https://api.github.com/repos/${config.owner}/${config.repo}/contents/${DATA_PATH}`,
+        { method: 'PUT', headers: this.headers(config.token), body: JSON.stringify(body) }
+      );
+      if (!retry.ok) throw new Error(`Save conflict retry failed: ${retry.status}`);
+      const rj = await retry.json();
+      return rj.content.sha;
+    }
+
+    if (res.status === 401) throw new Error('AUTH_EXPIRED');
+    if (res.status === 422) { const e = await res.json(); throw new Error(e.message || 'Validation error'); }
+    if (!res.ok) throw new Error(`Save failed: ${res.status}`);
+    const rj = await res.json();
+    return rj.content.sha;
+  }
+};
+
+/* ── Calibration Engine ────────────────────────────────── */
+
+function computeCalibration(decisions) {
+  const resolved = decisions.filter(d => d.status === 'resolved' && d.after.outcome !== null);
+  if (resolved.length === 0) return { brierScore: null, bins: {}, byStakes: {}, totalResolved: 0, timeline: [], tagPatterns: {} };
+
+  // Brier score
+  const brierScore = resolved.reduce((sum, d) => {
+    const actual = d.after.outcome === true ? 1 : d.after.outcome === false ? 0 : 0.5;
+    return sum + Math.pow(d.before.probability - actual, 2);
+  }, 0) / resolved.length;
+
+  // Calibration bins
+  const bins = {};
+  for (let i = 0; i <= 90; i += 10) bins[i] = { predicted: i + 5, decisions: [], actualRate: null, count: 0 };
+  resolved.forEach(d => {
+    const pct = d.before.probability * 100;
+    const bin = Math.min(90, Math.max(0, Math.floor(pct / 10) * 10));
+    bins[bin].decisions.push(d);
+    bins[bin].count++;
+  });
+  Object.values(bins).forEach(bin => {
+    if (bin.decisions.length > 0) {
+      const correct = bin.decisions.filter(d => d.after.outcome === true).length;
+      const partial = bin.decisions.filter(d => d.after.outcome === 'partial').length;
+      bin.actualRate = ((correct + partial * 0.5) / bin.decisions.length) * 100;
+    }
+  });
+
+  // Bias by stakes
+  const byStakes = {};
+  ['low', 'medium', 'high', 'critical'].forEach(s => {
+    const group = resolved.filter(d => d.stakes === s);
+    if (group.length >= 3) {
+      const avgDelta = group.reduce((sum, d) => sum + (d.after.calibrationDelta || 0), 0) / group.length;
+      const brier = group.reduce((sum, d) => {
+        const actual = d.after.outcome === true ? 1 : d.after.outcome === false ? 0 : 0.5;
+        return sum + Math.pow(d.before.probability - actual, 2);
+      }, 0) / group.length;
+      byStakes[s] = { count: group.length, avgDelta: Math.round(avgDelta * 100) / 100, brier: Math.round(brier * 100) / 100, isOverconfident: avgDelta > 0.15 };
+    }
+  });
+
+  // Timeline (rolling Brier over time, window of 10)
+  const sorted = [...resolved].sort((a, b) => new Date(a.after.resolvedAt) - new Date(b.after.resolvedAt));
+  const timeline = [];
+  for (let i = 9; i < sorted.length; i++) {
+    const window = sorted.slice(i - 9, i + 1);
+    const rb = window.reduce((sum, d) => {
+      const actual = d.after.outcome === true ? 1 : d.after.outcome === false ? 0 : 0.5;
+      return sum + Math.pow(d.before.probability - actual, 2);
+    }, 0) / window.length;
+    timeline.push({ date: sorted[i].after.resolvedAt, brier: Math.round(rb * 1000) / 1000, index: i + 1 });
+  }
+
+  // Tag patterns on wrong predictions
+  const tagPatterns = {};
+  resolved.filter(d => d.after.outcome === false).forEach(d => {
+    (d.tags || []).forEach(t => { tagPatterns[t] = (tagPatterns[t] || 0) + 1; });
+  });
+
+  // Average overconfidence
+  const avgOverconf = resolved.reduce((s, d) => s + (d.after.calibrationDelta || 0), 0) / resolved.length;
+
+  return { brierScore: Math.round(brierScore * 1000) / 1000, bins, byStakes, totalResolved: resolved.length, timeline, tagPatterns, avgOverconfidence: Math.round(avgOverconf * 100) };
+}
+
+/* ── Reducer ───────────────────────────────────────────── */
+
+const initialState = {
+  isAuthenticated: false,
+  config: { token: '', owner: '', repo: '', branch: 'main' },
+  decisions: [],
+  meta: null,
+  sha: null,
+  activeTab: 'new',
+  filters: { status: 'all', stakes: 'all', tags: [], search: '', sort: 'newest' },
+  isLoading: false,
+  isSaving: false,
+  toast: null,
+  settingsOpen: false,
+  resolvingId: null,
+  expandedId: null,
+};
+
+function reducer(state, action) {
+  switch (action.type) {
+    case 'SET_AUTH':
+      return { ...state, isAuthenticated: true, config: action.config };
+    case 'LOAD_DECISIONS':
+      return { ...state, decisions: action.data.decisions, meta: action.data.meta, sha: action.sha, isLoading: false };
+    case 'ADD_DECISION': {
+      const decisions = [action.decision, ...state.decisions];
+      const meta = { ...state.meta, totalDecisions: decisions.length, lastModified: now() };
+      return { ...state, decisions, meta };
+    }
+    case 'RESOLVE_DECISION': {
+      const decisions = state.decisions.map(d => d.id === action.id ? { ...d, ...action.updates, status: 'resolved', lastModified: now() } : d);
+      const resolved = decisions.filter(d => d.status === 'resolved').length;
+      const meta = { ...state.meta, resolvedDecisions: resolved, lastModified: now() };
+      return { ...state, decisions, meta, resolvingId: null };
+    }
+    case 'UPDATE_SHA':
+      return { ...state, sha: action.sha, isSaving: false };
+    case 'SET_TAB':
+      return { ...state, activeTab: action.tab, resolvingId: null, expandedId: null };
+    case 'SET_FILTERS':
+      return { ...state, filters: { ...state.filters, ...action.filters } };
+    case 'SET_LOADING':
+      return { ...state, isLoading: action.value };
+    case 'SET_SAVING':
+      return { ...state, isSaving: action.value };
+    case 'SHOW_TOAST':
+      return { ...state, toast: { message: action.message, type: action.toastType || 'success' } };
+    case 'HIDE_TOAST':
+      return { ...state, toast: null };
+    case 'SET_RESOLVING':
+      return { ...state, resolvingId: action.id };
+    case 'SET_EXPANDED':
+      return { ...state, expandedId: state.expandedId === action.id ? null : action.id };
+    case 'TOGGLE_SETTINGS':
+      return { ...state, settingsOpen: !state.settingsOpen };
+    case 'LOGOUT':
+      sessionStorage.removeItem('oracle_config');
+      return { ...initialState };
+    default:
+      return state;
+  }
+}
+
+/* ── Context ───────────────────────────────────────────── */
+
+const Ctx = createContext();
+
+/* ── Toast ─────────────────────────────────────────────── */
+
+function Toast() {
+  const { state, dispatch } = useContext(Ctx);
+  useEffect(() => {
+    if (state.toast) {
+      const t = setTimeout(() => dispatch({ type: 'HIDE_TOAST' }), 3500);
+      return () => clearTimeout(t);
+    }
+  }, [state.toast]);
+  if (!state.toast) return null;
+  const isError = state.toast.type === 'error';
+  return (
+    <div className="animate-slide" style={{
+      position: 'fixed', top: 16, right: 16, zIndex: 100, padding: '12px 20px',
+      borderRadius: 10, border: `1px solid ${isError ? '#ef4444' : '#22c55e'}`,
+      background: isError ? 'rgba(239,68,68,0.15)' : 'rgba(34,197,94,0.15)',
+      color: isError ? '#fca5a5' : '#86efac', fontSize: 14, fontWeight: 500,
+      maxWidth: 360, backdropFilter: 'blur(8px)'
+    }}>
+      {state.toast.message}
+    </div>
+  );
+}
+
+/* ── Auth Screen ───────────────────────────────────────── */
+
+function AuthScreen() {
+  const { dispatch } = useContext(Ctx);
+  const [owner, setOwner] = useState('');
+  const [repo, setRepo] = useState('oracle-protocol');
+  const [token, setToken] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const handleConnect = async () => {
+    if (!owner || !repo || !token) { setError('All fields are required.'); return; }
+    setLoading(true); setError('');
+    try {
+      const config = { token, owner, repo, branch: 'main' };
+      await GitHubAPI.validateConnection(config);
+      sessionStorage.setItem('oracle_config', JSON.stringify(config));
+      dispatch({ type: 'SET_AUTH', config });
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+      <div className="card animate-fade" style={{ maxWidth: 420, width: '100%' }}>
+        <div style={{ textAlign: 'center', marginBottom: 32 }}>
+          <div style={{ fontSize: 28, fontWeight: 800, color: '#6366f1', marginBottom: 4 }}>&#x2295; ORACLE PROTOCOL</div>
+          <div style={{ color: '#71717a', fontSize: 14 }}>Decision Intelligence</div>
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div>
+            <div className="label">GitHub Username</div>
+            <input className="input-field" value={owner} onChange={e => setOwner(e.target.value.trim())} placeholder="your-username" />
+          </div>
+          <div>
+            <div className="label">Repository Name</div>
+            <input className="input-field" value={repo} onChange={e => setRepo(e.target.value.trim())} placeholder="oracle-protocol" />
+          </div>
+          <div>
+            <div className="label">Personal Access Token</div>
+            <input className="input-field" type="password" value={token} onChange={e => setToken(e.target.value.trim())} placeholder="ghp_xxxxxxxxxxxx" />
+          </div>
+        </div>
+
+        <p style={{ color: '#71717a', fontSize: 12, marginTop: 12 }}>
+          Token needs <code style={{ color: '#a1a1aa' }}>repo</code> scope. Stored in session only. Never saved permanently.
+        </p>
+
+        {error && <p style={{ color: '#ef4444', fontSize: 13, marginTop: 12 }}>{error}</p>}
+
+        <button className="btn btn-primary" onClick={handleConnect} disabled={loading}
+          style={{ width: '100%', marginTop: 20, padding: '12px 0' }}>
+          {loading ? 'Connecting...' : 'Connect \u2192'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ── Probability Slider ────────────────────────────────── */
+
+function ProbabilitySlider({ value, onChange }) {
+  const pct = Math.round(value * 100);
+  const handleSlider = e => {
+    const v = Math.round(Number(e.target.value) / 5) * 5;
+    onChange(v / 100);
+  };
+  const handleInput = e => {
+    let v = parseInt(e.target.value, 10);
+    if (isNaN(v)) v = 50;
+    v = Math.max(0, Math.min(100, v));
+    onChange(v / 100);
+  };
+  return (
+    <div>
+      <div className="label">Probability</div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+        <input type="range" min="0" max="100" step="5" value={pct} onChange={handleSlider} style={{ flex: 1 }} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <input className="input-field mono" type="number" min="0" max="100" value={pct}
+            onChange={handleInput} style={{ width: 64, textAlign: 'center', padding: '6px 8px' }} />
+          <span className="mono" style={{ color: '#71717a' }}>%</span>
+        </div>
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: '#71717a', marginTop: 4, paddingRight: 84 }}>
+        <span>0%</span><span>50%</span><span>100%</span>
+      </div>
+    </div>
+  );
+}
+
+/* ── Stakes Picker ─────────────────────────────────────── */
+
+function StakesPicker({ value, onChange }) {
+  const opts = ['low', 'medium', 'high', 'critical'];
+  return (
+    <div>
+      <div className="label">Stakes</div>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        {opts.map(s => (
+          <button key={s} onClick={() => onChange(s)} style={{
+            padding: '6px 16px', borderRadius: 20, fontSize: 13, fontWeight: 600, cursor: 'pointer',
+            border: `1px solid ${value === s ? STAKES_COLORS[s] : '#2a2a3e'}`,
+            background: value === s ? STAKES_COLORS[s] + '22' : 'transparent',
+            color: value === s ? STAKES_COLORS[s] : '#a1a1aa',
+            textTransform: 'capitalize'
+          }}>
+            {s}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ── Tag Input ─────────────────────────────────────────── */
+
+function TagInput({ tags, onChange, allTags }) {
+  const [input, setInput] = useState('');
+  const suggestions = useMemo(() => {
+    if (!input) return [];
+    return allTags.filter(t => t.startsWith(input.toLowerCase()) && !tags.includes(t)).slice(0, 5);
+  }, [input, allTags, tags]);
+
+  const addTag = t => {
+    t = t.toLowerCase().trim();
+    if (t && !tags.includes(t) && tags.length < 5) { onChange([...tags, t]); setInput(''); }
+  };
+  const removeTag = t => onChange(tags.filter(x => x !== t));
+  const handleKey = e => {
+    if ((e.key === 'Enter' || e.key === ',') && input.trim()) {
+      e.preventDefault(); addTag(input);
+    }
+  };
+
+  return (
+    <div>
+      <div className="label">Tags</div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: tags.length ? 8 : 0 }}>
+        {tags.map(t => (
+          <span key={t} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 10px',
+            background: '#6366f122', border: '1px solid #6366f1', borderRadius: 14, fontSize: 12, color: '#818cf8' }}>
+            {t}
+            <span onClick={() => removeTag(t)} style={{ cursor: 'pointer', opacity: 0.6, fontWeight: 700 }}>&times;</span>
+          </span>
+        ))}
+      </div>
+      <div style={{ position: 'relative' }}>
+        <input className="input-field" value={input} onChange={e => setInput(e.target.value)}
+          onKeyDown={handleKey} placeholder={tags.length >= 5 ? 'Max 5 tags' : 'Add tag...'} disabled={tags.length >= 5} />
+        {suggestions.length > 0 && (
+          <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 10,
+            background: '#1a1a2e', border: '1px solid #2a2a3e', borderRadius: 8, marginTop: 4, overflow: 'hidden' }}>
+            {suggestions.map(s => (
+              <div key={s} onClick={() => addTag(s)} style={{ padding: '8px 14px', cursor: 'pointer', fontSize: 13, color: '#a1a1aa' }}
+                onMouseEnter={e => e.target.style.background = '#2a2a3e'} onMouseLeave={e => e.target.style.background = 'transparent'}>
+                {s}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ── New Decision Form ─────────────────────────────────── */
+
+function NewDecisionForm() {
+  const { state, dispatch, saveToGitHub } = useContext(Ctx);
+  const [decision, setDecision] = useState('');
+  const [prediction, setPrediction] = useState('');
+  const [probability, setProbability] = useState(0.5);
+  const [assumption, setAssumption] = useState('');
+  const [adversarial, setAdversarial] = useState('');
+  const [stakes, setStakes] = useState('medium');
+  const [tags, setTags] = useState([]);
+
+  const allTags = useMemo(() => {
+    const set = new Set();
+    state.decisions.forEach(d => (d.tags || []).forEach(t => set.add(t)));
+    return [...set].sort();
+  }, [state.decisions]);
+
+  const isValid = decision.trim() && prediction.trim() && assumption.trim() && adversarial.trim();
+
+  const handleSave = async () => {
+    if (!isValid || state.isSaving) return;
+    const newDecision = {
+      id: generateId(), created: now(), lastModified: now(), status: 'open',
+      before: { decision: decision.trim(), prediction: prediction.trim(), probability, hiddenAssumption: assumption.trim(), adversarialCheck: adversarial.trim() },
+      after: { resolvedAt: null, resolution: '', outcome: null, calibrationDelta: null, realLesson: '' },
+      tags: tags, stakes: stakes
+    };
+    dispatch({ type: 'ADD_DECISION', decision: newDecision });
+    const msg = `Oracle: New decision \u2014 ${truncate(decision.trim(), 50)}`;
+    await saveToGitHub(msg);
+    setDecision(''); setPrediction(''); setProbability(0.5); setAssumption(''); setAdversarial(''); setStakes('medium'); setTags([]);
+    dispatch({ type: 'SHOW_TOAST', message: 'Decision logged \u2713' });
+  };
+
+  return (
+    <div className="animate-fade" style={{ maxWidth: 640, margin: '0 auto' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+        <h2 style={{ fontSize: 18, fontWeight: 700 }}>New Decision</h2>
+        <span style={{ fontSize: 12, color: '#71717a' }}>~5 min</span>
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+        <div>
+          <div className="label">The Decision</div>
+          <textarea className="input-field" rows="3" value={decision} onChange={e => setDecision(e.target.value)}
+            placeholder="I am choosing to ___ over ___" />
+        </div>
+
+        <div>
+          <div className="label">Prediction</div>
+          <textarea className="input-field" rows="2" value={prediction} onChange={e => setPrediction(e.target.value)}
+            placeholder="I think there's a ___% chance this leads to..." />
+        </div>
+
+        <ProbabilitySlider value={probability} onChange={setProbability} />
+
+        <div>
+          <div className="label">Hidden Assumption</div>
+          <textarea className="input-field" rows="2" value={assumption} onChange={e => setAssumption(e.target.value)}
+            placeholder="This only works if ___ is true" />
+        </div>
+
+        <div>
+          <div className="label">Adversarial Check <span style={{ fontWeight: 400, color: '#71717a', textTransform: 'none' }}>(30 sec)</span></div>
+          <textarea className="input-field" rows="2" value={adversarial} onChange={e => setAdversarial(e.target.value)}
+            placeholder="The smartest person who disagrees would say..." />
+        </div>
+
+        <StakesPicker value={stakes} onChange={setStakes} />
+        <TagInput tags={tags} onChange={setTags} allTags={allTags} />
+
+        <button className="btn btn-primary" onClick={handleSave} disabled={!isValid || state.isSaving}
+          style={{ padding: '14px 0', fontSize: 15, marginTop: 8 }}>
+          {state.isSaving ? 'Saving...' : 'Save Decision'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ── Resolution Form ───────────────────────────────────── */
+
+function ResolutionForm({ decision }) {
+  const { dispatch, saveToGitHub, state } = useContext(Ctx);
+  const [resolution, setResolution] = useState('');
+  const [outcome, setOutcome] = useState(null);
+  const [lesson, setLesson] = useState('');
+
+  const delta = calcDelta(decision.before.probability, outcome);
+  const isValid = resolution.trim() && outcome !== null && lesson.trim();
+
+  const handleResolve = async () => {
+    if (!isValid || state.isSaving) return;
+    const updates = {
+      after: { resolvedAt: now(), resolution: resolution.trim(), outcome, calibrationDelta: delta, realLesson: lesson.trim() }
+    };
+    dispatch({ type: 'RESOLVE_DECISION', id: decision.id, updates });
+    const msg = `Oracle: Resolved decision \u2014 ${truncate(decision.before.decision, 50)}`;
+    await saveToGitHub(msg);
+    dispatch({ type: 'SHOW_TOAST', message: 'Decision resolved \u2713' });
+  };
+
+  const outcomeBtns = [
+    { val: true, label: 'Correct', icon: '\u2713' },
+    { val: false, label: 'Wrong', icon: '\u2717' },
+    { val: 'partial', label: 'Partial', icon: '~' },
+  ];
+
+  return (
+    <div className="animate-fade" style={{ borderTop: '1px solid #2a2a3e', marginTop: 16, paddingTop: 16 }}>
+      <div style={{ fontSize: 13, color: '#71717a', marginBottom: 12 }}>
+        <div>Your prediction: <span className="mono" style={{ color: '#e4e4e7' }}>{Math.round(decision.before.probability * 100)}%</span> chance</div>
+        <div>Your assumption: <span style={{ color: '#a1a1aa' }}>{decision.before.hiddenAssumption}</span></div>
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <div>
+          <div className="label">What Actually Happened?</div>
+          <textarea className="input-field" rows="3" value={resolution} onChange={e => setResolution(e.target.value)}
+            placeholder="Specific outcome..." />
+        </div>
+
+        <div>
+          <div className="label">Outcome</div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {outcomeBtns.map(o => (
+              <button key={String(o.val)} onClick={() => setOutcome(o.val)} style={{
+                flex: 1, padding: '8px 12px', borderRadius: 8, cursor: 'pointer', fontSize: 13, fontWeight: 600,
+                border: `1px solid ${outcome === o.val ? (o.val === true ? '#22c55e' : o.val === false ? '#ef4444' : '#f59e0b') : '#2a2a3e'}`,
+                background: outcome === o.val ? (o.val === true ? '#22c55e22' : o.val === false ? '#ef444422' : '#f59e0b22') : 'transparent',
+                color: outcome === o.val ? '#e4e4e7' : '#71717a'
+              }}>
+                {o.icon} {o.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {outcome !== null && delta !== null && (
+          <div className="animate-fade" style={{ padding: 12, background: '#0a0a0f', borderRadius: 8, fontSize: 13 }}>
+            <span style={{ color: '#71717a' }}>Calibration: </span>
+            <span className="mono" style={{ color: Math.abs(delta) <= 0.05 ? '#22c55e' : delta > 0 ? '#f97316' : '#818cf8' }}>
+              {delta > 0 ? '+' : ''}{delta.toFixed(2)}
+            </span>
+            <span style={{ color: '#71717a' }}> ({deltaLabel(delta)})</span>
+          </div>
+        )}
+
+        <div>
+          <div className="label">The Real Lesson</div>
+          <div style={{ fontSize: 11, color: '#71717a', marginBottom: 6, fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>
+            Not "I should've worked harder." Which assumption was wrong?
+          </div>
+          <textarea className="input-field" rows="2" value={lesson} onChange={e => setLesson(e.target.value)} />
+        </div>
+
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button className="btn btn-ghost" onClick={() => dispatch({ type: 'SET_RESOLVING', id: null })} style={{ flex: 1 }}>Cancel</button>
+          <button className="btn btn-primary" onClick={handleResolve} disabled={!isValid || state.isSaving} style={{ flex: 1 }}>
+            {state.isSaving ? 'Saving...' : 'Mark Resolved \u2713'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── Decision Card ─────────────────────────────────────── */
+
+function DecisionCard({ d }) {
+  const { state, dispatch } = useContext(Ctx);
+  const isOpen = d.status === 'open';
+  const isResolving = state.resolvingId === d.id;
+  const isExpanded = state.expandedId === d.id;
+
+  return (
+    <div className="card animate-fade" style={{ borderLeft: `3px solid ${STATUS_COLORS[d.status]}` }}>
+      {/* Header */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 11, fontWeight: 700, color: STATUS_COLORS[d.status], textTransform: 'uppercase' }}>
+            {isOpen ? '\u25CF Open' : '\u2713 Resolved'}
+          </span>
+          <span style={{ fontSize: 12, color: '#71717a' }}>{formatDate(d.created)}</span>
+        </div>
+        <span style={{ fontSize: 11, fontWeight: 700, color: STAKES_COLORS[d.stakes], textTransform: 'uppercase' }}>
+          {d.stakes}
+        </span>
+      </div>
+
+      {/* Decision text */}
+      <div onClick={() => dispatch({ type: 'SET_EXPANDED', id: d.id })} style={{ cursor: 'pointer' }}>
+        <p style={{ fontSize: 15, fontWeight: 500, lineHeight: 1.5, marginBottom: 8 }}>
+          {isExpanded ? d.before.decision : truncate(d.before.decision, 120)}
+        </p>
+        <p style={{ fontSize: 13, color: '#a1a1aa', marginBottom: 4 }}>
+          Prediction: <span className="mono">{Math.round(d.before.probability * 100)}%</span> &mdash; {truncate(d.before.prediction, 80)}
+        </p>
+        <p style={{ fontSize: 13, color: '#71717a' }}>
+          Assumption: {truncate(d.before.hiddenAssumption, 80)}
+        </p>
+      </div>
+
+      {/* Expanded details */}
+      {isExpanded && (
+        <div className="animate-fade" style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid #2a2a3e', fontSize: 13 }}>
+          <div style={{ marginBottom: 8 }}>
+            <span style={{ color: '#71717a' }}>Adversarial: </span>
+            <span style={{ color: '#a1a1aa' }}>{d.before.adversarialCheck}</span>
+          </div>
+          {d.status === 'resolved' && d.after && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <div><span style={{ color: '#71717a' }}>Resolution: </span><span style={{ color: '#a1a1aa' }}>{d.after.resolution}</span></div>
+              <div>
+                <span style={{ color: '#71717a' }}>Outcome: </span>
+                <span style={{ color: d.after.outcome === true ? '#22c55e' : d.after.outcome === false ? '#ef4444' : '#f59e0b' }}>
+                  {d.after.outcome === true ? 'Correct' : d.after.outcome === false ? 'Wrong' : 'Partial'}
+                </span>
+                {d.after.calibrationDelta !== null && (
+                  <span className="mono" style={{ marginLeft: 8, color: '#a1a1aa' }}>
+                    (delta: {d.after.calibrationDelta > 0 ? '+' : ''}{d.after.calibrationDelta.toFixed(2)}, {deltaLabel(d.after.calibrationDelta)})
+                  </span>
+                )}
+              </div>
+              {d.after.realLesson && <div><span style={{ color: '#71717a' }}>Lesson: </span><span style={{ color: '#e4e4e7' }}>{d.after.realLesson}</span></div>}
+              {d.after.resolvedAt && <div style={{ color: '#71717a' }}>Resolved: {formatDate(d.after.resolvedAt)}</div>}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Tags + actions */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12 }}>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          {(d.tags || []).map(t => (
+            <span key={t} style={{ padding: '2px 8px', background: '#6366f115', border: '1px solid #6366f133', borderRadius: 10, fontSize: 11, color: '#818cf8' }}>{t}</span>
+          ))}
+        </div>
+        {isOpen && !isResolving && (
+          <button className="btn btn-ghost" onClick={() => dispatch({ type: 'SET_RESOLVING', id: d.id })} style={{ padding: '6px 14px', fontSize: 13 }}>
+            Resolve &rarr;
+          </button>
+        )}
+      </div>
+
+      {/* Inline resolution form */}
+      {isResolving && <ResolutionForm decision={d} />}
+    </div>
+  );
+}
+
+/* ── Decision Log ──────────────────────────────────────── */
+
+function DecisionLog() {
+  const { state, dispatch } = useContext(Ctx);
+  const { decisions, filters } = state;
+
+  const allTags = useMemo(() => {
+    const set = new Set();
+    decisions.forEach(d => (d.tags || []).forEach(t => set.add(t)));
+    return [...set].sort();
+  }, [decisions]);
+
+  const filtered = useMemo(() => {
+    let list = [...decisions];
+    if (filters.status !== 'all') list = list.filter(d => d.status === filters.status);
+    if (filters.stakes !== 'all') list = list.filter(d => d.stakes === filters.stakes);
+    if (filters.tags.length > 0) list = list.filter(d => filters.tags.some(t => (d.tags || []).includes(t)));
+    if (filters.search) {
+      const q = filters.search.toLowerCase();
+      list = list.filter(d =>
+        d.before.decision.toLowerCase().includes(q) ||
+        d.before.prediction.toLowerCase().includes(q) ||
+        d.before.hiddenAssumption.toLowerCase().includes(q) ||
+        (d.after.resolution || '').toLowerCase().includes(q) ||
+        (d.after.realLesson || '').toLowerCase().includes(q)
+      );
+    }
+    // Sort
+    switch (filters.sort) {
+      case 'oldest': list.sort((a, b) => new Date(a.created) - new Date(b.created)); break;
+      case 'stakes': { const o = { critical: 0, high: 1, medium: 2, low: 3 }; list.sort((a, b) => o[a.stakes] - o[b.stakes]); break; }
+      case 'probability': list.sort((a, b) => b.before.probability - a.before.probability); break;
+      default: list.sort((a, b) => new Date(b.created) - new Date(a.created));
+    }
+    return list;
+  }, [decisions, filters]);
+
+  const setFilter = f => dispatch({ type: 'SET_FILTERS', filters: f });
+
+  return (
+    <div className="animate-fade" style={{ maxWidth: 720, margin: '0 auto' }}>
+      <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 16 }}>Decision Log</h2>
+
+      {/* Filters */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
+        {/* Status filter */}
+        <select className="input-field" style={{ width: 'auto', padding: '6px 12px', fontSize: 13 }}
+          value={filters.status} onChange={e => setFilter({ status: e.target.value })}>
+          <option value="all">All Status</option>
+          <option value="open">Open</option>
+          <option value="resolved">Resolved</option>
+        </select>
+
+        {/* Stakes filter */}
+        <select className="input-field" style={{ width: 'auto', padding: '6px 12px', fontSize: 13 }}
+          value={filters.stakes} onChange={e => setFilter({ stakes: e.target.value })}>
+          <option value="all">All Stakes</option>
+          <option value="low">Low</option>
+          <option value="medium">Medium</option>
+          <option value="high">High</option>
+          <option value="critical">Critical</option>
+        </select>
+
+        {/* Sort */}
+        <select className="input-field" style={{ width: 'auto', padding: '6px 12px', fontSize: 13 }}
+          value={filters.sort} onChange={e => setFilter({ sort: e.target.value })}>
+          <option value="newest">Newest</option>
+          <option value="oldest">Oldest</option>
+          <option value="stakes">By Stakes</option>
+          <option value="probability">By Probability</option>
+        </select>
+
+        {/* Tag filter */}
+        {allTags.length > 0 && (
+          <select className="input-field" style={{ width: 'auto', padding: '6px 12px', fontSize: 13 }}
+            value="" onChange={e => {
+              if (e.target.value && !filters.tags.includes(e.target.value)) setFilter({ tags: [...filters.tags, e.target.value] });
+            }}>
+            <option value="">Filter by tag...</option>
+            {allTags.map(t => <option key={t} value={t}>{t}</option>)}
+          </select>
+        )}
+      </div>
+
+      {/* Active tag filters */}
+      {filters.tags.length > 0 && (
+        <div style={{ display: 'flex', gap: 6, marginBottom: 12, flexWrap: 'wrap' }}>
+          {filters.tags.map(t => (
+            <span key={t} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 10px',
+              background: '#6366f122', border: '1px solid #6366f1', borderRadius: 14, fontSize: 12, color: '#818cf8' }}>
+              {t}
+              <span onClick={() => setFilter({ tags: filters.tags.filter(x => x !== t) })} style={{ cursor: 'pointer', fontWeight: 700 }}>&times;</span>
+            </span>
+          ))}
+          <span onClick={() => setFilter({ tags: [] })} style={{ fontSize: 12, color: '#71717a', cursor: 'pointer', padding: '3px 8px' }}>Clear all</span>
+        </div>
+      )}
+
+      {/* Search */}
+      <div style={{ marginBottom: 20 }}>
+        <input className="input-field" value={filters.search} onChange={e => setFilter({ search: e.target.value })}
+          placeholder="Search decisions..." style={{ padding: '10px 14px' }} />
+      </div>
+
+      {/* List */}
+      {filtered.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: 60, color: '#71717a' }}>
+          {decisions.length === 0 ? (
+            <div>
+              <div style={{ fontSize: 40, marginBottom: 16 }}>&#x1F4CB;</div>
+              <p style={{ fontSize: 16, marginBottom: 8 }}>No decisions yet</p>
+              <button className="btn btn-primary" onClick={() => dispatch({ type: 'SET_TAB', tab: 'new' })}>
+                Log Your First Decision
+              </button>
+            </div>
+          ) : (
+            <div>
+              <p>No decisions match your filters.</p>
+              <button className="btn btn-ghost" onClick={() => setFilter({ status: 'all', stakes: 'all', tags: [], search: '' })} style={{ marginTop: 8 }}>
+                Clear Filters
+              </button>
+            </div>
+          )}
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {filtered.map(d => <DecisionCard key={d.id} d={d} />)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ── Calibration Dashboard ─────────────────────────────── */
+
+function StatsBar({ cal, decisions }) {
+  const open = decisions.filter(d => d.status === 'open').length;
+  const total = decisions.length;
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 12, marginBottom: 24 }}>
+      {[
+        { label: 'Total', value: total },
+        { label: 'Open', value: open },
+        { label: 'Resolved', value: cal.totalResolved },
+        { label: 'Brier Score', value: cal.brierScore !== null ? cal.brierScore.toFixed(3) : '\u2014' },
+        { label: 'Avg Bias', value: cal.avgOverconfidence !== undefined ? `${cal.avgOverconfidence > 0 ? '+' : ''}${cal.avgOverconfidence}%` : '\u2014' },
+      ].map(s => (
+        <div key={s.label} style={{ background: '#12121a', border: '1px solid #2a2a3e', borderRadius: 10, padding: '14px 16px', textAlign: 'center' }}>
+          <div className="mono" style={{ fontSize: 22, fontWeight: 700, color: '#e4e4e7' }}>{s.value}</div>
+          <div style={{ fontSize: 11, color: '#71717a', marginTop: 2, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{s.label}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function CalibrationCurve({ bins }) {
+  const data = Object.entries(bins)
+    .filter(([_, b]) => b.count > 0)
+    .map(([k, b]) => ({ predicted: b.predicted, actual: Math.round(b.actualRate), count: b.count, label: `${k}-${Number(k) + 10}%` }));
+
+  if (data.length === 0) return null;
+
+  // SVG chart (no Recharts dependency)
+  const w = 400, h = 300, pad = 50;
+  const xScale = v => pad + (v / 100) * (w - pad * 2);
+  const yScale = v => h - pad - (v / 100) * (h - pad * 2);
+
+  return (
+    <div className="card" style={{ marginBottom: 24 }}>
+      <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 16 }}>Calibration Curve</h3>
+      <div style={{ overflowX: 'auto' }}>
+        <svg viewBox={`0 0 ${w} ${h}`} style={{ width: '100%', maxWidth: 500, height: 'auto' }}>
+          {/* Grid */}
+          {[0, 25, 50, 75, 100].map(v => (
+            <g key={v}>
+              <line x1={xScale(v)} y1={yScale(0)} x2={xScale(v)} y2={yScale(100)} stroke="#2a2a3e" strokeWidth="1" />
+              <line x1={xScale(0)} y1={yScale(v)} x2={xScale(100)} y2={yScale(v)} stroke="#2a2a3e" strokeWidth="1" />
+              <text x={xScale(v)} y={h - 20} fill="#71717a" fontSize="11" textAnchor="middle" fontFamily="monospace">{v}%</text>
+              <text x={20} y={yScale(v) + 4} fill="#71717a" fontSize="11" textAnchor="middle" fontFamily="monospace">{v}%</text>
+            </g>
+          ))}
+          {/* Perfect diagonal */}
+          <line x1={xScale(0)} y1={yScale(0)} x2={xScale(100)} y2={yScale(100)} stroke="#6366f1" strokeWidth="2" strokeDasharray="6,4" opacity="0.5" />
+          {/* Data points + line */}
+          {data.length > 1 && (
+            <polyline fill="none" stroke="#818cf8" strokeWidth="2"
+              points={data.map(d => `${xScale(d.predicted)},${yScale(d.actual)}`).join(' ')} />
+          )}
+          {data.map((d, i) => (
+            <g key={i}>
+              <circle cx={xScale(d.predicted)} cy={yScale(d.actual)} r={Math.max(5, Math.min(14, d.count * 3))}
+                fill="#6366f1" opacity="0.8" stroke="#0a0a0f" strokeWidth="2" />
+              <title>{d.label}: predicted {d.predicted}%, actual {d.actual}% ({d.count} decisions)</title>
+            </g>
+          ))}
+          {/* Axis labels */}
+          <text x={w / 2} y={h - 2} fill="#71717a" fontSize="11" textAnchor="middle">Predicted Probability</text>
+          <text x={10} y={h / 2} fill="#71717a" fontSize="11" textAnchor="middle" transform={`rotate(-90,10,${h / 2})`}>Actual Outcome Rate</text>
+        </svg>
+      </div>
+      <p style={{ fontSize: 11, color: '#71717a', marginTop: 8, textAlign: 'center' }}>
+        Perfect calibration = diagonal. Dot size = sample count.
+      </p>
+    </div>
+  );
+}
+
+function BiasPatternDetector({ cal }) {
+  const patterns = [];
+
+  // Stakes-based patterns
+  Object.entries(cal.byStakes).forEach(([stake, data]) => {
+    if (Math.abs(data.avgDelta) > 0.15) {
+      const dir = data.avgDelta > 0 ? 'overconfident' : 'underconfident';
+      patterns.push({
+        type: 'warning',
+        text: `You are ${Math.round(Math.abs(data.avgDelta) * 100)}% ${dir} on ${stake.toUpperCase()} stakes decisions (${data.count} samples)`
+      });
+    } else if (data.count >= 5) {
+      patterns.push({ type: 'success', text: `Well-calibrated on ${stake.toUpperCase()} stakes decisions (${data.count} samples, Brier: ${data.brier})` });
+    }
+  });
+
+  // Timeline trend
+  if (cal.timeline.length >= 2) {
+    const first = cal.timeline[0].brier;
+    const last = cal.timeline[cal.timeline.length - 1].brier;
+    if (last < first - 0.03) {
+      patterns.push({ type: 'trend', text: `Calibration improving over recent decisions (Brier: ${first.toFixed(2)} \u2192 ${last.toFixed(2)})` });
+    } else if (last > first + 0.03) {
+      patterns.push({ type: 'warning', text: `Calibration declining over recent decisions (Brier: ${first.toFixed(2)} \u2192 ${last.toFixed(2)})` });
+    }
+  }
+
+  // Wrong-prediction tag patterns
+  const tagEntries = Object.entries(cal.tagPatterns).sort((a, b) => b[1] - a[1]).slice(0, 3);
+  tagEntries.forEach(([tag, count]) => {
+    if (count >= 2) {
+      patterns.push({ type: 'warning', text: `Tag "${tag}" appears in ${count} wrong predictions` });
+    }
+  });
+
+  if (patterns.length === 0) return null;
+
+  const icons = { warning: '\u26A0\uFE0F', success: '\u2713', trend: '\u2191' };
+  const colors = { warning: '#f59e0b', success: '#22c55e', trend: '#818cf8' };
+
+  return (
+    <div className="card" style={{ marginBottom: 24 }}>
+      <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 16 }}>Detected Patterns</h3>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {patterns.map((p, i) => (
+          <div key={i} style={{ display: 'flex', gap: 10, alignItems: 'flex-start', fontSize: 13 }}>
+            <span style={{ color: colors[p.type], fontSize: 16, lineHeight: 1 }}>{icons[p.type]}</span>
+            <span style={{ color: '#a1a1aa' }}>{p.text}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function CalibrationTimeline({ timeline }) {
+  if (timeline.length < 2) return null;
+
+  const w = 400, h = 200, pad = 50;
+  const maxB = Math.max(...timeline.map(t => t.brier), 0.3);
+  const xScale = (i) => pad + (i / (timeline.length - 1)) * (w - pad * 2);
+  const yScale = (v) => h - pad - (v / maxB) * (h - pad * 2);
+
+  return (
+    <div className="card" style={{ marginBottom: 24 }}>
+      <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 16 }}>Calibration Over Time</h3>
+      <div style={{ overflowX: 'auto' }}>
+        <svg viewBox={`0 0 ${w} ${h}`} style={{ width: '100%', maxWidth: 500, height: 'auto' }}>
+          {/* Grid lines */}
+          {[0, 0.1, 0.2, 0.3].filter(v => v <= maxB).map(v => (
+            <g key={v}>
+              <line x1={pad} y1={yScale(v)} x2={w - pad} y2={yScale(v)} stroke="#2a2a3e" strokeWidth="1" />
+              <text x={pad - 8} y={yScale(v) + 4} fill="#71717a" fontSize="10" textAnchor="end" fontFamily="monospace">{v.toFixed(1)}</text>
+            </g>
+          ))}
+          {/* Reference: random coin flip line */}
+          <line x1={pad} y1={yScale(0.25)} x2={w - pad} y2={yScale(0.25)} stroke="#ef444444" strokeWidth="1" strokeDasharray="4,4" />
+          <text x={w - pad + 4} y={yScale(0.25) + 3} fill="#ef444444" fontSize="9">random</text>
+          {/* Line */}
+          <polyline fill="none" stroke="#6366f1" strokeWidth="2"
+            points={timeline.map((t, i) => `${xScale(i)},${yScale(t.brier)}`).join(' ')} />
+          {/* Dots */}
+          {timeline.map((t, i) => (
+            <circle key={i} cx={xScale(i)} cy={yScale(t.brier)} r="3" fill="#6366f1" stroke="#0a0a0f" strokeWidth="1">
+              <title>Decision #{t.index}: Brier {t.brier}</title>
+            </circle>
+          ))}
+          {/* Axis labels */}
+          <text x={w / 2} y={h - 5} fill="#71717a" fontSize="10" textAnchor="middle">Resolved Decisions (rolling window of 10)</text>
+          <text x={8} y={h / 2} fill="#71717a" fontSize="10" textAnchor="middle" transform={`rotate(-90,8,${h / 2})`}>Brier Score</text>
+        </svg>
+      </div>
+      <p style={{ fontSize: 11, color: '#71717a', marginTop: 8, textAlign: 'center' }}>
+        Lower = better calibrated. 0 = perfect, 0.25 = random.
+      </p>
+    </div>
+  );
+}
+
+function CalibrationDashboard() {
+  const { state } = useContext(Ctx);
+  const cal = useMemo(() => computeCalibration(state.decisions), [state.decisions]);
+
+  if (cal.totalResolved < 1) {
+    const open = state.decisions.filter(d => d.status === 'open').length;
+    return (
+      <div className="animate-fade" style={{ maxWidth: 720, margin: '0 auto', textAlign: 'center', padding: 60 }}>
+        <div style={{ fontSize: 40, marginBottom: 16 }}>&#x1F4CA;</div>
+        <p style={{ fontSize: 16, color: '#a1a1aa', marginBottom: 8 }}>
+          Resolve at least a few decisions to see calibration patterns.
+        </p>
+        {open > 0 && <p style={{ fontSize: 14, color: '#71717a' }}>You have {open} open decision{open > 1 ? 's' : ''} waiting.</p>}
+      </div>
+    );
+  }
+
+  return (
+    <div className="animate-fade" style={{ maxWidth: 720, margin: '0 auto' }}>
+      <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 20 }}>Calibration Dashboard</h2>
+      <StatsBar cal={cal} decisions={state.decisions} />
+      <CalibrationCurve bins={cal.bins} />
+      <BiasPatternDetector cal={cal} />
+      <CalibrationTimeline timeline={cal.timeline} />
+    </div>
+  );
+}
+
+/* ── Export / Import ────────────────────────────────────── */
+
+function ExportImport() {
+  const { state, dispatch, saveToGitHub } = useContext(Ctx);
+  const fileRef = useRef(null);
+
+  const exportJSON = () => {
+    const blob = new Blob([JSON.stringify({ meta: state.meta, decisions: state.decisions }, null, 2)], { type: 'application/json' });
+    downloadBlob(blob, 'oracle-decisions.json');
+  };
+
+  const exportCSV = () => {
+    const headers = ['ID', 'Date', 'Status', 'Decision', 'Prediction', 'Probability', 'Hidden Assumption', 'Adversarial Check', 'Stakes', 'Tags', 'Resolved Date', 'Resolution', 'Outcome', 'Calibration Delta', 'Real Lesson'];
+    const rows = state.decisions.map(d => [
+      d.id, d.created, d.status, d.before.decision, d.before.prediction, Math.round(d.before.probability * 100) + '%',
+      d.before.hiddenAssumption, d.before.adversarialCheck, d.stakes, (d.tags || []).join(', '),
+      d.after.resolvedAt || '', d.after.resolution || '', d.after.outcome === null ? '' : String(d.after.outcome),
+      d.after.calibrationDelta === null ? '' : d.after.calibrationDelta.toFixed(3), d.after.realLesson || ''
+    ]);
+    const csv = [headers, ...rows].map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
+    downloadBlob(new Blob([csv], { type: 'text/csv' }), 'oracle-decisions.csv');
+  };
+
+  const exportXLSX = () => {
+    if (typeof XLSX === 'undefined') { dispatch({ type: 'SHOW_TOAST', message: 'XLSX library not loaded', toastType: 'error' }); return; }
+    const wb = XLSX.utils.book_new();
+
+    // Sheet 1: Decisions
+    const rows = state.decisions.map(d => ({
+      ID: d.id, Date: d.created, Status: d.status,
+      Decision: d.before.decision, Prediction: d.before.prediction,
+      Probability: Math.round(d.before.probability * 100) + '%',
+      'Hidden Assumption': d.before.hiddenAssumption, 'Adversarial Check': d.before.adversarialCheck,
+      Stakes: d.stakes, Tags: (d.tags || []).join(', '),
+      'Resolved Date': d.after.resolvedAt || '', Resolution: d.after.resolution || '',
+      Outcome: d.after.outcome === null ? '' : String(d.after.outcome),
+      'Calibration Delta': d.after.calibrationDelta !== null ? d.after.calibrationDelta : '',
+      'Real Lesson': d.after.realLesson || ''
+    }));
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), 'Decisions');
+
+    // Sheet 2: Calibration Summary
+    const cal = computeCalibration(state.decisions);
+    const calRows = Object.entries(cal.bins).filter(([_, b]) => b.count > 0).map(([k, b]) => ({
+      'Probability Bin': `${k}-${Number(k) + 10}%`,
+      Count: b.count,
+      'Actual Rate': b.actualRate !== null ? Math.round(b.actualRate) + '%' : 'N/A',
+      'Brier Score': cal.brierScore !== null ? cal.brierScore.toFixed(3) : 'N/A'
+    }));
+    if (calRows.length > 0) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(calRows), 'Calibration Summary');
+
+    XLSX.writeFile(wb, 'oracle-decisions.xlsx');
+  };
+
+  const importXLSX = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const data = await file.arrayBuffer();
+      const wb = XLSX.read(data);
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws);
+
+      const existingIds = new Set(state.decisions.map(d => d.id));
+      let added = 0;
+
+      rows.forEach(r => {
+        if (r.ID && !existingIds.has(r.ID)) {
+          const probStr = String(r.Probability || '50%').replace('%', '');
+          const prob = parseFloat(probStr) / 100;
+          const outcome = r.Outcome === 'true' ? true : r.Outcome === 'false' ? false : r.Outcome === 'partial' ? 'partial' : null;
+
+          state.decisions.push({
+            id: r.ID, created: r.Date || now(), lastModified: now(),
+            status: r.Status || 'open',
+            before: {
+              decision: r.Decision || '', prediction: r.Prediction || '',
+              probability: isNaN(prob) ? 0.5 : prob,
+              hiddenAssumption: r['Hidden Assumption'] || '', adversarialCheck: r['Adversarial Check'] || ''
+            },
+            after: {
+              resolvedAt: r['Resolved Date'] || null, resolution: r.Resolution || '', outcome,
+              calibrationDelta: r['Calibration Delta'] !== '' && r['Calibration Delta'] !== undefined ? Number(r['Calibration Delta']) : null,
+              realLesson: r['Real Lesson'] || ''
+            },
+            tags: (r.Tags || '').split(',').map(t => t.trim().toLowerCase()).filter(Boolean),
+            stakes: r.Stakes || 'medium'
+          });
+          existingIds.add(r.ID);
+          added++;
+        }
+      });
+
+      if (added > 0) {
+        dispatch({ type: 'LOAD_DECISIONS', data: { meta: { ...state.meta, totalDecisions: state.decisions.length, lastModified: now() }, decisions: [...state.decisions] }, sha: state.sha });
+        await saveToGitHub(`Oracle: Imported ${added} decisions`);
+        dispatch({ type: 'SHOW_TOAST', message: `Imported ${added} decision${added > 1 ? 's' : ''} \u2713` });
+      } else {
+        dispatch({ type: 'SHOW_TOAST', message: 'No new decisions to import (all duplicates)', toastType: 'error' });
+      }
+    } catch (err) {
+      dispatch({ type: 'SHOW_TOAST', message: 'Import failed: ' + err.message, toastType: 'error' });
+    }
+    if (fileRef.current) fileRef.current.value = '';
+  };
+
+  function downloadBlob(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename; a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  return (
+    <div className="animate-fade" style={{ maxWidth: 640, margin: '0 auto' }}>
+      <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 24 }}>Export & Import</h2>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 32 }}>
+        <button className="btn btn-ghost" onClick={exportXLSX} style={{ textAlign: 'left', padding: '14px 20px' }}>
+          <span style={{ marginRight: 8 }}>&darr;</span> Export as Excel (.xlsx)
+        </button>
+        <button className="btn btn-ghost" onClick={exportJSON} style={{ textAlign: 'left', padding: '14px 20px' }}>
+          <span style={{ marginRight: 8 }}>&darr;</span> Export as JSON
+        </button>
+        <button className="btn btn-ghost" onClick={exportCSV} style={{ textAlign: 'left', padding: '14px 20px' }}>
+          <span style={{ marginRight: 8 }}>&darr;</span> Export as CSV
+        </button>
+      </div>
+
+      <div style={{ borderTop: '1px solid #2a2a3e', paddingTop: 24 }}>
+        <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 12 }}>Import from Excel</h3>
+        <div onClick={() => fileRef.current?.click()} style={{
+          border: '2px dashed #2a2a3e', borderRadius: 12, padding: '40px 20px', textAlign: 'center',
+          cursor: 'pointer', transition: 'border-color 0.2s'
+        }} onMouseEnter={e => e.currentTarget.style.borderColor = '#6366f1'} onMouseLeave={e => e.currentTarget.style.borderColor = '#2a2a3e'}>
+          <div style={{ fontSize: 24, marginBottom: 8 }}>&#x1F4C1;</div>
+          <p style={{ color: '#a1a1aa', fontSize: 14 }}>Drag & drop .xlsx file here or click to browse</p>
+        </div>
+        <input ref={fileRef} type="file" accept=".xlsx,.xls" onChange={importXLSX} style={{ display: 'none' }} />
+        <p style={{ color: '#71717a', fontSize: 12, marginTop: 8 }}>
+          Import will MERGE with existing data. Duplicates (same ID) will be skipped.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+/* ── Settings Panel ────────────────────────────────────── */
+
+function SettingsPanel() {
+  const { state, dispatch, loadDecisions } = useContext(Ctx);
+  if (!state.settingsOpen) return null;
+
+  return (
+    <div>
+      {/* Backdrop */}
+      <div onClick={() => dispatch({ type: 'TOGGLE_SETTINGS' })}
+        style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 50 }} />
+      {/* Panel */}
+      <div className="animate-slide" style={{
+        position: 'fixed', top: 0, right: 0, bottom: 0, width: 340, maxWidth: '90vw', zIndex: 51,
+        background: '#12121a', borderLeft: '1px solid #2a2a3e', padding: 24, overflowY: 'auto'
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 32 }}>
+          <h2 style={{ fontSize: 18, fontWeight: 700 }}>Settings</h2>
+          <button onClick={() => dispatch({ type: 'TOGGLE_SETTINGS' })} style={{ background: 'none', border: 'none', color: '#71717a', cursor: 'pointer', fontSize: 20 }}>&times;</button>
+        </div>
+
+        <div style={{ marginBottom: 28 }}>
+          <h3 style={{ fontSize: 13, fontWeight: 700, color: '#71717a', marginBottom: 12, textTransform: 'uppercase', letterSpacing: '0.05em' }}>GitHub Connection</h3>
+          <div style={{ fontSize: 13, color: '#a1a1aa', display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <div>Username: <span style={{ color: '#e4e4e7' }}>{state.config.owner}</span></div>
+            <div>Repo: <span style={{ color: '#e4e4e7' }}>{state.config.repo}</span></div>
+            <div>Status: <span style={{ color: '#22c55e' }}>Connected</span></div>
+          </div>
+          <button className="btn btn-ghost" onClick={() => dispatch({ type: 'LOGOUT' })} style={{ marginTop: 12, width: '100%' }}>
+            Disconnect
+          </button>
+        </div>
+
+        <div style={{ marginBottom: 28 }}>
+          <h3 style={{ fontSize: 13, fontWeight: 700, color: '#71717a', marginBottom: 12, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Display</h3>
+          <div style={{ fontSize: 13, color: '#a1a1aa' }}>Theme: Dark (V1)</div>
+        </div>
+
+        <div>
+          <h3 style={{ fontSize: 13, fontWeight: 700, color: '#71717a', marginBottom: 12, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Data</h3>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <button className="btn btn-ghost" onClick={async () => { await loadDecisions(); dispatch({ type: 'SHOW_TOAST', message: 'Synced from GitHub \u2713' }); }} style={{ width: '100%' }}>
+              Force Sync from GitHub
+            </button>
+            <button className="btn btn-danger" onClick={() => {
+              if (confirm('Clear all local data? (GitHub data remains intact)')) {
+                dispatch({ type: 'LOAD_DECISIONS', data: { meta: { version: 1, created: now(), lastModified: now(), totalDecisions: 0, resolvedDecisions: 0, overallCalibrationScore: null }, decisions: [] }, sha: state.sha });
+                dispatch({ type: 'SHOW_TOAST', message: 'Local data cleared' });
+              }
+            }} style={{ width: '100%' }}>
+              Clear All Local Data
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── Header ────────────────────────────────────────────── */
+
+function Header() {
+  const { dispatch } = useContext(Ctx);
+  return (
+    <header style={{
+      display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+      padding: '14px 20px', borderBottom: '1px solid #2a2a3e'
+    }}>
+      <div style={{ fontSize: 18, fontWeight: 800, color: '#6366f1', letterSpacing: '-0.02em' }}>
+        &#x2295; ORACLE PROTOCOL
+      </div>
+      <button onClick={() => dispatch({ type: 'TOGGLE_SETTINGS' })}
+        style={{ background: 'none', border: 'none', color: '#71717a', cursor: 'pointer', fontSize: 20, padding: 4 }}
+        title="Settings">
+        &#x2699;
+      </button>
+    </header>
+  );
+}
+
+/* ── Tab Bar ───────────────────────────────────────────── */
+
+function TabBar() {
+  const { state, dispatch } = useContext(Ctx);
+  const tabs = [
+    { id: 'new', label: '+ New', mobileLabel: '+' },
+    { id: 'log', label: 'Log', mobileLabel: 'Log' },
+    { id: 'dashboard', label: 'Dashboard', mobileLabel: 'Stats' },
+    { id: 'export', label: 'Export', mobileLabel: 'Export' },
+  ];
+
+  return (
+    <nav style={{
+      display: 'flex', gap: 0,
+      borderBottom: '1px solid #2a2a3e',
+      position: 'sticky', top: 0, zIndex: 30, background: '#0a0a0f',
+    }}>
+      {tabs.map(t => (
+        <button key={t.id} onClick={() => dispatch({ type: 'SET_TAB', tab: t.id })} style={{
+          flex: 1, padding: '12px 16px', background: 'none', border: 'none', cursor: 'pointer',
+          fontSize: 13, fontWeight: 600, color: state.activeTab === t.id ? '#6366f1' : '#71717a',
+          borderBottom: state.activeTab === t.id ? '2px solid #6366f1' : '2px solid transparent',
+          transition: 'all 0.15s'
+        }}>
+          <span className="sm-hide" style={{ display: 'none' }}>{t.mobileLabel}</span>
+          <span>{t.label}</span>
+        </button>
+      ))}
+    </nav>
+  );
+}
+
+/* ── App ───────────────────────────────────────────────── */
+
+function App() {
+  const [state, dispatch] = useReducer(reducer, initialState);
+  const saveLock = useRef(false);
+
+  // Restore session
+  useEffect(() => {
+    const stored = sessionStorage.getItem('oracle_config');
+    if (stored) {
+      try {
+        const config = JSON.parse(stored);
+        if (config.token && config.owner && config.repo) {
+          dispatch({ type: 'SET_AUTH', config });
+        }
+      } catch (e) {}
+    }
+  }, []);
+
+  // Load decisions on auth
+  const loadDecisions = useCallback(async () => {
+    if (!state.config.token) return;
+    dispatch({ type: 'SET_LOADING', value: true });
+    try {
+      const { data, sha } = await GitHubAPI.fetchDecisions(state.config);
+      dispatch({ type: 'LOAD_DECISIONS', data, sha });
+    } catch (e) {
+      if (e.message === 'AUTH_EXPIRED') { dispatch({ type: 'LOGOUT' }); dispatch({ type: 'SHOW_TOAST', message: 'Token expired. Please reconnect.', toastType: 'error' }); return; }
+      dispatch({ type: 'SHOW_TOAST', message: 'Failed to load: ' + e.message, toastType: 'error' });
+      dispatch({ type: 'SET_LOADING', value: false });
+    }
+  }, [state.config]);
+
+  useEffect(() => {
+    if (state.isAuthenticated) loadDecisions();
+  }, [state.isAuthenticated]);
+
+  // Save to GitHub
+  const saveToGitHub = useCallback(async (commitMsg) => {
+    if (saveLock.current) return;
+    saveLock.current = true;
+    dispatch({ type: 'SET_SAVING', value: true });
+    try {
+      // Build data from current state (useRef to avoid stale closure)
+      const data = { meta: stateRef.current.meta, decisions: stateRef.current.decisions };
+      const newSha = await GitHubAPI.saveDecisions(stateRef.current.config, data, stateRef.current.sha, commitMsg);
+      dispatch({ type: 'UPDATE_SHA', sha: newSha });
+    } catch (e) {
+      if (e.message === 'AUTH_EXPIRED') { dispatch({ type: 'LOGOUT' }); dispatch({ type: 'SHOW_TOAST', message: 'Token expired. Please reconnect.', toastType: 'error' }); return; }
+      dispatch({ type: 'SHOW_TOAST', message: 'Save failed: ' + e.message, toastType: 'error' });
+      dispatch({ type: 'SET_SAVING', value: false });
+    } finally {
+      saveLock.current = false;
+    }
+  }, []);
+
+  // Keep a ref to current state for saveToGitHub
+  const stateRef = useRef(state);
+  useEffect(() => { stateRef.current = state; }, [state]);
+
+  // Loading screen
+  if (state.isAuthenticated && state.isLoading) {
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ fontSize: 24, color: '#6366f1', marginBottom: 12, fontWeight: 700 }}>&#x2295;</div>
+        <div style={{ color: '#71717a', fontSize: 14 }}>Connecting to GitHub...</div>
+      </div>
+    );
+  }
+
+  return (
+    <Ctx.Provider value={{ state, dispatch, saveToGitHub, loadDecisions }}>
+      {!state.isAuthenticated ? (
+        <AuthScreen />
+      ) : (
+        <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
+          <Header />
+          <TabBar />
+          <main style={{ flex: 1, padding: '24px 16px', maxWidth: 960, margin: '0 auto', width: '100%' }}>
+            {state.activeTab === 'new' && <NewDecisionForm />}
+            {state.activeTab === 'log' && <DecisionLog />}
+            {state.activeTab === 'dashboard' && <CalibrationDashboard />}
+            {state.activeTab === 'export' && <ExportImport />}
+          </main>
+          <SettingsPanel />
+        </div>
+      )}
+      <Toast />
+    </Ctx.Provider>
+  );
+}
+
+/* ── Mount ─────────────────────────────────────────────── */
+
+ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
+  </script>
+</body>
+</html>
