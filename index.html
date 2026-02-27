@@ -139,13 +139,15 @@ function deltaLabel(delta) {
 
 const GitHubAPI = {
   headers(token) {
-    return { 'Authorization': `Bearer ${token}`, 'Accept': 'application/vnd.github.v3+json' };
+    return { 'Authorization': `token ${token}`, 'Accept': 'application/vnd.github.v3+json', 'Content-Type': 'application/json' };
   },
 
   async validateConnection(config) {
+    console.log('[Oracle API] validateConnection:', config.owner + '/' + config.repo);
     const res = await fetch(`https://api.github.com/repos/${config.owner}/${config.repo}`, {
       headers: this.headers(config.token)
     });
+    console.log('[Oracle API] validateConnection response:', res.status);
     if (res.status === 401) throw new Error('Invalid or expired token. Check your PAT.');
     if (res.status === 403) throw new Error('Access denied. Ensure your PAT has repo scope.');
     if (res.status === 404) throw new Error('Repository not found. Check owner/repo name.');
@@ -154,49 +156,51 @@ const GitHubAPI = {
   },
 
   async fetchDecisions(config) {
-    const res = await fetch(
-      `https://api.github.com/repos/${config.owner}/${config.repo}/contents/${DATA_PATH}?ref=${config.branch}`,
-      { headers: this.headers(config.token) }
-    );
-    if (res.status === 404) return { data: { meta: { version: 1, created: now(), lastModified: now(), totalDecisions: 0, resolvedDecisions: 0, overallCalibrationScore: null }, decisions: [] }, sha: null };
+    const url = `https://api.github.com/repos/${config.owner}/${config.repo}/contents/${DATA_PATH}?ref=${config.branch}`;
+    console.log('[Oracle API] fetchDecisions:', url);
+    const res = await fetch(url, { headers: this.headers(config.token) });
+    console.log('[Oracle API] fetchDecisions response:', res.status);
+    if (res.status === 404) { console.log('[Oracle API] File not found — starting fresh'); return { data: { meta: { version: 1, created: now(), lastModified: now(), totalDecisions: 0, resolvedDecisions: 0, overallCalibrationScore: null }, decisions: [] }, sha: null }; }
     if (res.status === 401) throw new Error('AUTH_EXPIRED');
     if (!res.ok) throw new Error(`Failed to fetch: ${res.status}`);
     const json = await res.json();
     const content = b64Decode(json.content);
-    return { data: JSON.parse(content), sha: json.sha };
+    const parsed = JSON.parse(content);
+    console.log('[Oracle API] Loaded', parsed.decisions.length, 'decisions, SHA:', json.sha);
+    return { data: parsed, sha: json.sha };
   },
 
   async saveDecisions(config, data, sha, commitMsg) {
+    console.log('[Oracle API] saveDecisions called:', { owner: config.owner, repo: config.repo, sha, commitMsg, decisionsCount: data.decisions.length });
+    const jsonStr = JSON.stringify(data, null, 2);
     const body = {
       message: commitMsg,
-      content: b64Encode(JSON.stringify(data, null, 2)),
+      content: b64Encode(jsonStr),
       branch: config.branch
     };
     if (sha) body.sha = sha;
 
-    const res = await fetch(
-      `https://api.github.com/repos/${config.owner}/${config.repo}/contents/${DATA_PATH}`,
-      { method: 'PUT', headers: this.headers(config.token), body: JSON.stringify(body) }
-    );
+    const url = `https://api.github.com/repos/${config.owner}/${config.repo}/contents/${DATA_PATH}`;
+    console.log('[Oracle API] PUT', url, '| sha:', sha || '(creating new file)');
+    const res = await fetch(url, { method: 'PUT', headers: this.headers(config.token), body: JSON.stringify(body) });
+    console.log('[Oracle API] Response:', res.status, res.statusText);
 
     if (res.status === 409) {
-      // Conflict — re-fetch and retry
+      console.log('[Oracle API] Conflict — re-fetching and retrying...');
       const fresh = await this.fetchDecisions(config);
       body.sha = fresh.sha;
-      // Merge: use our data (last-write-wins for V1)
-      const retry = await fetch(
-        `https://api.github.com/repos/${config.owner}/${config.repo}/contents/${DATA_PATH}`,
-        { method: 'PUT', headers: this.headers(config.token), body: JSON.stringify(body) }
-      );
-      if (!retry.ok) throw new Error(`Save conflict retry failed: ${retry.status}`);
+      const retry = await fetch(url, { method: 'PUT', headers: this.headers(config.token), body: JSON.stringify(body) });
+      console.log('[Oracle API] Retry response:', retry.status, retry.statusText);
+      if (!retry.ok) { const errBody = await retry.text(); throw new Error(`Save conflict retry failed: ${retry.status} — ${errBody}`); }
       const rj = await retry.json();
       return rj.content.sha;
     }
 
     if (res.status === 401) throw new Error('AUTH_EXPIRED');
-    if (res.status === 422) { const e = await res.json(); throw new Error(e.message || 'Validation error'); }
-    if (!res.ok) throw new Error(`Save failed: ${res.status}`);
+    if (res.status === 422) { const e = await res.json(); console.error('[Oracle API] 422 error:', e); throw new Error(e.message || 'Validation error'); }
+    if (!res.ok) { const errBody = await res.text(); console.error('[Oracle API] Error body:', errBody); throw new Error(`Save failed: ${res.status} — ${errBody}`); }
     const rj = await res.json();
+    console.log('[Oracle API] Save success. New SHA:', rj.content.sha);
     return rj.content.sha;
   }
 };
@@ -558,11 +562,24 @@ function NewDecisionForm() {
       after: { resolvedAt: null, resolution: '', outcome: null, calibrationDelta: null, realLesson: '' },
       tags: tags, stakes: stakes
     };
+    // Build complete data payload BEFORE dispatch (avoids stale-ref race condition)
+    const newDecisions = [newDecision, ...state.decisions];
+    const newMeta = {
+      ...(state.meta || { version: 1, created: now(), overallCalibrationScore: null }),
+      totalDecisions: newDecisions.length,
+      resolvedDecisions: newDecisions.filter(d => d.status === 'resolved').length,
+      lastModified: now()
+    };
+    console.log('[Oracle] handleSave: built payload with', newDecisions.length, 'decisions');
     dispatch({ type: 'ADD_DECISION', decision: newDecision });
     const msg = `Oracle: New decision \u2014 ${truncate(decision.trim(), 50)}`;
-    await saveToGitHub(msg);
-    setDecision(''); setPrediction(''); setProbability(0.5); setAssumption(''); setAdversarial(''); setStakes('medium'); setTags([]);
-    dispatch({ type: 'SHOW_TOAST', message: 'Decision logged \u2713' });
+    const ok = await saveToGitHub(msg, { meta: newMeta, decisions: newDecisions });
+    if (ok) {
+      setDecision(''); setPrediction(''); setProbability(0.5); setAssumption(''); setAdversarial(''); setStakes('medium'); setTags([]);
+      dispatch({ type: 'SHOW_TOAST', message: 'Decision logged \u2713' });
+    } else {
+      console.error('[Oracle] handleSave: save returned false — decision in UI but NOT on GitHub');
+    }
   };
 
   return (
@@ -627,10 +644,21 @@ function ResolutionForm({ decision }) {
     const updates = {
       after: { resolvedAt: now(), resolution: resolution.trim(), outcome, calibrationDelta: delta, realLesson: lesson.trim() }
     };
+    // Build complete data payload BEFORE dispatch (avoids stale-ref race condition)
+    const newDecisions = state.decisions.map(d => d.id === decision.id ? { ...d, ...updates, status: 'resolved', lastModified: now() } : d);
+    const resolvedCount = newDecisions.filter(d => d.status === 'resolved').length;
+    const newMeta = {
+      ...(state.meta || { version: 1, created: now(), overallCalibrationScore: null }),
+      totalDecisions: newDecisions.length,
+      resolvedDecisions: resolvedCount,
+      lastModified: now()
+    };
     dispatch({ type: 'RESOLVE_DECISION', id: decision.id, updates });
     const msg = `Oracle: Resolved decision \u2014 ${truncate(decision.before.decision, 50)}`;
-    await saveToGitHub(msg);
-    dispatch({ type: 'SHOW_TOAST', message: 'Decision resolved \u2713' });
+    const ok = await saveToGitHub(msg, { meta: newMeta, decisions: newDecisions });
+    if (ok) {
+      dispatch({ type: 'SHOW_TOAST', message: 'Decision resolved \u2713' });
+    }
   };
 
   const outcomeBtns = [
@@ -1181,6 +1209,7 @@ function ExportImport() {
       const rows = XLSX.utils.sheet_to_json(ws);
 
       const existingIds = new Set(state.decisions.map(d => d.id));
+      const newDecisions = [...state.decisions];
       let added = 0;
 
       rows.forEach(r => {
@@ -1189,7 +1218,7 @@ function ExportImport() {
           const prob = parseFloat(probStr) / 100;
           const outcome = r.Outcome === 'true' ? true : r.Outcome === 'false' ? false : r.Outcome === 'partial' ? 'partial' : null;
 
-          state.decisions.push({
+          newDecisions.push({
             id: r.ID, created: r.Date || now(), lastModified: now(),
             status: r.Status || 'open',
             before: {
@@ -1211,9 +1240,12 @@ function ExportImport() {
       });
 
       if (added > 0) {
-        dispatch({ type: 'LOAD_DECISIONS', data: { meta: { ...state.meta, totalDecisions: state.decisions.length, lastModified: now() }, decisions: [...state.decisions] }, sha: state.sha });
-        await saveToGitHub(`Oracle: Imported ${added} decisions`);
-        dispatch({ type: 'SHOW_TOAST', message: `Imported ${added} decision${added > 1 ? 's' : ''} \u2713` });
+        const newMeta = { ...(state.meta || { version: 1, created: now(), overallCalibrationScore: null }), totalDecisions: newDecisions.length, lastModified: now(), resolvedDecisions: newDecisions.filter(d => d.status === 'resolved').length };
+        dispatch({ type: 'LOAD_DECISIONS', data: { meta: newMeta, decisions: newDecisions }, sha: state.sha });
+        const ok = await saveToGitHub(`Oracle: Imported ${added} decisions`, { meta: newMeta, decisions: newDecisions });
+        if (ok) {
+          dispatch({ type: 'SHOW_TOAST', message: `Imported ${added} decision${added > 1 ? 's' : ''} \u2713` });
+        }
       } else {
         dispatch({ type: 'SHOW_TOAST', message: 'No new decisions to import (all duplicates)', toastType: 'error' });
       }
@@ -1413,20 +1445,28 @@ function App() {
     if (state.isAuthenticated) loadDecisions();
   }, [state.isAuthenticated]);
 
-  // Save to GitHub
-  const saveToGitHub = useCallback(async (commitMsg) => {
-    if (saveLock.current) return;
+  // Save to GitHub — accepts explicit data to avoid stale-ref race condition
+  const saveToGitHub = useCallback(async (commitMsg, dataOverride) => {
+    console.log('[Oracle] saveToGitHub called:', commitMsg, dataOverride ? `(${dataOverride.decisions.length} decisions)` : '(using stateRef)');
+    if (saveLock.current) { console.warn('[Oracle] saveLock is active — skipping save'); return false; }
     saveLock.current = true;
     dispatch({ type: 'SET_SAVING', value: true });
     try {
-      // Build data from current state (useRef to avoid stale closure)
-      const data = { meta: stateRef.current.meta, decisions: stateRef.current.decisions };
-      const newSha = await GitHubAPI.saveDecisions(stateRef.current.config, data, stateRef.current.sha, commitMsg);
+      const config = stateRef.current.config;
+      const sha = stateRef.current.sha;
+      const data = dataOverride || { meta: stateRef.current.meta, decisions: stateRef.current.decisions };
+      console.log('[Oracle] Config:', { owner: config.owner, repo: config.repo, hasToken: !!config.token, sha });
+      console.log('[Oracle] Data to save:', data.decisions.length, 'decisions');
+      const newSha = await GitHubAPI.saveDecisions(config, data, sha, commitMsg);
+      console.log('[Oracle] Save complete. New SHA:', newSha);
       dispatch({ type: 'UPDATE_SHA', sha: newSha });
+      return true;
     } catch (e) {
-      if (e.message === 'AUTH_EXPIRED') { dispatch({ type: 'LOGOUT' }); dispatch({ type: 'SHOW_TOAST', message: 'Token expired. Please reconnect.', toastType: 'error' }); return; }
+      console.error('[Oracle] saveToGitHub error:', e);
+      if (e.message === 'AUTH_EXPIRED') { dispatch({ type: 'LOGOUT' }); dispatch({ type: 'SHOW_TOAST', message: 'Token expired. Please reconnect.', toastType: 'error' }); return false; }
       dispatch({ type: 'SHOW_TOAST', message: 'Save failed: ' + e.message, toastType: 'error' });
       dispatch({ type: 'SET_SAVING', value: false });
+      return false;
     } finally {
       saveLock.current = false;
     }
