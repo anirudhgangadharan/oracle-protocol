@@ -2,10 +2,33 @@
   "meta": {
     "version": 1,
     "created": "2026-02-27T06:20:44.193Z",
-    "lastModified": "2026-02-27T06:20:44.194Z",
-    "totalDecisions": 0,
+    "lastModified": "2026-02-28T02:18:05.891Z",
+    "totalDecisions": 1,
     "resolvedDecisions": 0,
     "overallCalibrationScore": null
   },
-  "decisions": []
+  "decisions": [
+    {
+      "id": "270ac07e-89d3-4f54-ad1a-5099b45a4f28",
+      "created": "2026-02-28T02:18:05.876Z",
+      "lastModified": "2026-02-28T02:18:05.891Z",
+      "status": "open",
+      "before": {
+        "decision": "I am choosing to complete HTGAA over iftar",
+        "prediction": "There is a 80% probability that this leads to me finishing week 4 homework",
+        "probability": 0.8,
+        "hiddenAssumption": "This only works if I execute without getting high on food low on fomo",
+        "adversarialCheck": "Consistency gives results over intensity"
+      },
+      "after": {
+        "resolvedAt": null,
+        "resolution": "",
+        "outcome": null,
+        "calibrationDelta": null,
+        "realLesson": ""
+      },
+      "tags": [],
+      "stakes": "high"
+    }
+  ]
 }
