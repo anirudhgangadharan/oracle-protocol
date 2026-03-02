@@ -2,12 +2,34 @@
   "meta": {
     "version": 1,
     "created": "2026-02-27T06:20:44.193Z",
-    "lastModified": "2026-02-28T02:18:05.891Z",
-    "totalDecisions": 1,
+    "lastModified": "2026-03-02T18:40:33.071Z",
+    "totalDecisions": 2,
     "resolvedDecisions": 0,
     "overallCalibrationScore": null
   },
   "decisions": [
+    {
+      "id": "add3a309-1f65-4a21-9777-544671ac5ae6",
+      "created": "2026-03-02T18:40:33.044Z",
+      "lastModified": "2026-03-02T18:40:33.070Z",
+      "status": "open",
+      "before": {
+        "decision": "I am choosing to work on myself over investing (in time and emotion ) in her",
+        "prediction": "I think there's a 90% chance that this leads to me achieving my goals-- PhD in Europe",
+        "probability": 0.9,
+        "hiddenAssumption": "This only works if I am able to regulate my nervous system -- emotional regulation, stay focused -- and maintain my mental,  emotional and physical health.",
+        "adversarialCheck": "The smartest person that disagrees would say-- without having an alternative for the emotional anchoring and outlet she provides I am bound to fail. I need a way to channel my energy"
+      },
+      "after": {
+        "resolvedAt": null,
+        "resolution": "",
+        "outcome": null,
+        "calibrationDelta": null,
+        "realLesson": ""
+      },
+      "tags": [],
+      "stakes": "critical"
+    },
     {
       "id": "270ac07e-89d3-4f54-ad1a-5099b45a4f28",
       "created": "2026-02-28T02:18:05.876Z",
