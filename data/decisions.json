@@ -2,9 +2,9 @@
   "meta": {
     "version": 1,
     "created": "2026-02-27T06:20:44.193Z",
-    "lastModified": "2026-03-02T18:40:33.071Z",
+    "lastModified": "2026-03-02T18:42:38.124Z",
     "totalDecisions": 2,
-    "resolvedDecisions": 0,
+    "resolvedDecisions": 1,
     "overallCalibrationScore": null
   },
   "decisions": [
@@ -33,8 +33,8 @@
     {
       "id": "270ac07e-89d3-4f54-ad1a-5099b45a4f28",
       "created": "2026-02-28T02:18:05.876Z",
-      "lastModified": "2026-02-28T02:18:05.891Z",
-      "status": "open",
+      "lastModified": "2026-03-02T18:42:38.124Z",
+      "status": "resolved",
       "before": {
         "decision": "I am choosing to complete HTGAA over iftar",
         "prediction": "There is a 80% probability that this leads to me finishing week 4 homework",
@@ -43,11 +43,11 @@
         "adversarialCheck": "Consistency gives results over intensity"
       },
       "after": {
-        "resolvedAt": null,
-        "resolution": "",
-        "outcome": null,
-        "calibrationDelta": null,
-        "realLesson": ""
+        "resolvedAt": "2026-03-02T18:42:38.124Z",
+        "resolution": "I didn't go for iftar, I ended up sleeping the whole day, having dinner with Isabel and Amal, spoke for a huge amount of time with Rania and ended up doing nothing.",
+        "outcome": false,
+        "calibrationDelta": 0.8,
+        "realLesson": "Assumption that I can work without an emotional outlet was wrong. My emotional abilities have not progressed to that level"
       },
       "tags": [],
       "stakes": "high"
