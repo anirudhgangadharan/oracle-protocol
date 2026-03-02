@@ -2,12 +2,34 @@
   "meta": {
     "version": 1,
     "created": "2026-02-27T06:20:44.193Z",
-    "lastModified": "2026-03-02T18:42:38.124Z",
-    "totalDecisions": 2,
+    "lastModified": "2026-03-02T20:09:05.559Z",
+    "totalDecisions": 3,
     "resolvedDecisions": 1,
     "overallCalibrationScore": null
   },
   "decisions": [
+    {
+      "id": "b10a9cd2-20f4-467d-8e9b-ead080af9f50",
+      "created": "2026-03-02T20:09:05.559Z",
+      "lastModified": "2026-03-02T20:09:05.559Z",
+      "status": "open",
+      "before": {
+        "decision": "I am choosing to learn deeply about money over hanging out with the mallu gang",
+        "prediction": "I think there is a 60 % chance that this leads to fundamentally changing my plans right the moment I understand to what i will do after mbbs",
+        "probability": 0.6,
+        "hiddenAssumption": "This only works if I am able to handle the pain of not being included in social events.",
+        "adversarialCheck": "The smartest person who actually disagrees would say I would sabotage myself in worse ways"
+      },
+      "after": {
+        "resolvedAt": null,
+        "resolution": "",
+        "outcome": null,
+        "calibrationDelta": null,
+        "realLesson": ""
+      },
+      "tags": [],
+      "stakes": "medium"
+    },
     {
       "id": "add3a309-1f65-4a21-9777-544671ac5ae6",
       "created": "2026-03-02T18:40:33.044Z",
