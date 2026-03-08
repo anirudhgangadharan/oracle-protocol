@@ -2,12 +2,34 @@
   "meta": {
     "version": 1,
     "created": "2026-02-27T06:20:44.193Z",
-    "lastModified": "2026-03-02T20:09:05.559Z",
-    "totalDecisions": 3,
+    "lastModified": "2026-03-08T06:39:18.952Z",
+    "totalDecisions": 4,
     "resolvedDecisions": 1,
     "overallCalibrationScore": null
   },
   "decisions": [
+    {
+      "id": "cffc58a6-0110-41ff-ac81-928330ee9783",
+      "created": "2026-03-08T06:39:18.926Z",
+      "lastModified": "2026-03-08T06:39:18.952Z",
+      "status": "open",
+      "before": {
+        "decision": "I am choosing to listen to the mix - Apex Quant Sub + Apex Quant Story + Modelling Excellence on Dualmix.vercel.app over studying for 30 mins",
+        "prediction": "I think there's a 60% chance that I'll be able to absorb, and learn faster with greater intensity for the exams tomorrow.",
+        "probability": 0.6,
+        "hiddenAssumption": "This only works if suggestions have an effect on my mind.",
+        "adversarialCheck": "The smartest person I know would disagree and say that competence is built from action not listening to hypnosis."
+      },
+      "after": {
+        "resolvedAt": null,
+        "resolution": "",
+        "outcome": null,
+        "calibrationDelta": null,
+        "realLesson": ""
+      },
+      "tags": [],
+      "stakes": "medium"
+    },
     {
       "id": "b10a9cd2-20f4-467d-8e9b-ead080af9f50",
       "created": "2026-03-02T20:09:05.559Z",
